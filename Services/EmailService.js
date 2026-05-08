@@ -12,14 +12,19 @@ function transporter() {
     if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
         throw new Error('SMTP_HOST / SMTP_USER / SMTP_PASS must all be set in .env');
     }
+    const port = Number(process.env.SMTP_PORT || 465);
     _transporter = nodemailer.createTransport({
         host: process.env.SMTP_HOST,
-        port: Number(process.env.SMTP_PORT || 587),
-        secure: false, // STARTTLS on 587
+        port,
+        // 465 = implicit SSL/TLS; 587 = STARTTLS upgrade. Derive automatically.
+        secure: port === 465,
         auth: {
             user: process.env.SMTP_USER,
             pass: process.env.SMTP_PASS
-        }
+        },
+        connectionTimeout: 15000,
+        greetingTimeout: 10000,
+        socketTimeout: 20000
     });
     return _transporter;
 }
