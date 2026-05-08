@@ -16,6 +16,7 @@
     "@hapi/hapi": "^21.3.12",
     "@hapi/inert": "^7.1.0",
     "@hapi/vision": "^7.0.3",
+    "@sendgrid/mail": "^8.1.6",
     "axios": "^1.7.7",
     "bcrypt": "^5.1.1",
     "dotenv": "^16.4.5",

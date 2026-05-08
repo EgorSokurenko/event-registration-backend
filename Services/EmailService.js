@@ -1,29 +1,25 @@
 'use strict';
 
 const nodemailer = require('nodemailer');
+const sgMail = require('@sendgrid/mail');
 const dotenv = require('dotenv');
 
 dotenv.config();
 
 let _transporter = null;
+let _sgKeyLoaded = null;
 
-function transporter() {
+function smtpTransporter() {
     if (_transporter) return _transporter;
-    if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
-        throw new Error('SMTP_HOST / SMTP_USER / SMTP_PASS must all be set in .env');
-    }
     const port = Number(process.env.SMTP_PORT || 465);
     _transporter = nodemailer.createTransport({
         host: process.env.SMTP_HOST,
         port,
-        // 465 = implicit SSL/TLS; 587 = STARTTLS upgrade. Derive automatically.
         secure: port === 465,
         auth: {
             user: process.env.SMTP_USER,
             pass: process.env.SMTP_PASS
         },
-        // Force IPv4 — many cloud hosts (Railway included) have flaky IPv6 egress
-        // that causes phantom "Connection timeout" errors against Gmail.
         family: 4,
         connectionTimeout: 15000,
         greetingTimeout: 10000,
@@ -32,14 +28,40 @@ function transporter() {
     return _transporter;
 }
 
+function ensureSendGrid() {
+    const key = process.env.SENDGRID_API_KEY;
+    if (!key) throw new Error('SENDGRID_API_KEY is not set');
+    if (_sgKeyLoaded !== key) {
+        sgMail.setApiKey(key);
+        _sgKeyLoaded = key;
+    }
+}
+
+// Pick the transport. SendGrid wins if its key is set (production-friendly:
+// HTTPS POST instead of SMTP, works from any cloud host). Falls back to
+// nodemailer SMTP for local dev with Gmail.
+function provider() {
+    if (process.env.SENDGRID_API_KEY) return 'sendgrid';
+    if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) return 'smtp';
+    return null;
+}
+
 function isConfigured() {
-    return !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+    return provider() !== null;
+}
+
+function fromName() {
+    return process.env.EMAIL_FROM_NAME || 'Deep Calls to Deep';
+}
+
+function fromEmail() {
+    // SMTP_USER is the canonical sender address. Same value used as both SMTP
+    // login and SendGrid's verified single sender.
+    return process.env.SMTP_USER || '';
 }
 
 function fromHeader() {
-    const name = process.env.EMAIL_FROM_NAME || 'Deep Calls to Deep';
-    const addr = process.env.SMTP_USER;
-    return `"${name}" <${addr}>`;
+    return `"${fromName()}" <${fromEmail()}>`;
 }
 
 function escapeHtml(s) {
@@ -136,19 +158,48 @@ function buildText({ firstName, eventName, eventDate, venue, venueMapUrl, ticket
 async function sendTicketEmail({ to, firstName, eventName, eventDate, venue, venueMapUrl, ticketUrl }) {
     const html = buildHtml({ firstName, eventName, eventDate, venue, venueMapUrl, ticketUrl });
     const text = buildText({ firstName, eventName, eventDate, venue, venueMapUrl, ticketUrl });
+    const subject = `Ваш квиток на ${eventName}`;
 
-    const info = await transporter().sendMail({
-        from: fromHeader(),
-        to,
-        subject: `Ваш квиток на ${eventName}`,
-        text,
-        html
-    });
-    return { messageId: info.messageId, accepted: info.accepted, rejected: info.rejected };
+    const which = provider();
+
+    if (which === 'sendgrid') {
+        ensureSendGrid();
+        const [response] = await sgMail.send({
+            from: { email: fromEmail(), name: fromName() },
+            to,
+            subject,
+            html,
+            text
+        });
+        return {
+            messageId: response.headers?.['x-message-id'] || 'sendgrid',
+            accepted: [to],
+            rejected: []
+        };
+    }
+
+    if (which === 'smtp') {
+        const info = await smtpTransporter().sendMail({
+            from: fromHeader(),
+            to,
+            subject,
+            text,
+            html
+        });
+        return { messageId: info.messageId, accepted: info.accepted, rejected: info.rejected };
+    }
+
+    throw new Error('No email provider configured (set SENDGRID_API_KEY or SMTP_*)');
 }
 
 async function verifyConnection() {
-    return transporter().verify();
+    const which = provider();
+    if (which === 'smtp') return smtpTransporter().verify();
+    if (which === 'sendgrid') {
+        ensureSendGrid();
+        return true; // SendGrid validates the key on first send.
+    }
+    return false;
 }
 
 module.exports = {
