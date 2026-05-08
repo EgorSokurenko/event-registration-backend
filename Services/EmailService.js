@@ -22,6 +22,9 @@ function transporter() {
             user: process.env.SMTP_USER,
             pass: process.env.SMTP_PASS
         },
+        // Force IPv4 — many cloud hosts (Railway included) have flaky IPv6 egress
+        // that causes phantom "Connection timeout" errors against Gmail.
+        family: 4,
         connectionTimeout: 15000,
         greetingTimeout: 10000,
         socketTimeout: 20000
