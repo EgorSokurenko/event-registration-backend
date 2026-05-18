@@ -11,7 +11,8 @@ const registrationPayload = Joi.object({
     email: Joi.string().email().trim().lowercase().required(),
     age: Joi.number().integer().min(15).max(35).required(),
     city: Joi.string().trim().min(1).max(80).required(),
-    church: Joi.string().trim().min(1).max(120).required()
+    church: Joi.string().trim().min(1).max(120).required(),
+    promoCode: Joi.string().trim().max(50).optional().allow('').default('')
 });
 
 const routes = [

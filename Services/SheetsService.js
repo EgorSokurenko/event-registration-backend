@@ -14,7 +14,8 @@ const SCHEMA = {
             'id', 'createdAt',
             'firstName', 'lastName', 'phone', 'email', 'age', 'city', 'church',
             'paymentStatus', 'monoInvoiceId', 'paidAt',
-            'arrived', 'arrivedAt', 'arrivedBy'
+            'arrived', 'arrivedAt', 'arrivedBy',
+            'promoCode'
         ]
     },
     Admins: {
@@ -29,8 +30,14 @@ const SCHEMA = {
             ['eventDate', '29–30 травня 2026', 'Display string'],
             ['venue', 'Manuilivskiy Avenue 1, Dnipro', 'Venue + address'],
             ['ticketPrice', '400', 'Number, in major currency units'],
-            ['currency', 'UAH', 'ISO 4217 code']
+            ['currency', 'UAH', 'ISO 4217 code'],
+            ['registrationLimit', '0', 'Max paid registrations (0 = unlimited)']
         ]
+    },
+    PromoCodes: {
+        title: 'PromoCodes',
+        headers: ['code', 'discount', 'limit'],
+        defaults: []
     }
 };
 
@@ -38,7 +45,8 @@ const CACHE_TTL_MS = 60_000;
 const cache = {
     Registrations: { value: null, fetchedAt: 0, refreshing: null },
     Admins: { value: null, fetchedAt: 0, refreshing: null },
-    Settings: { value: null, fetchedAt: 0, refreshing: null }
+    Settings: { value: null, fetchedAt: 0, refreshing: null },
+    PromoCodes: { value: null, fetchedAt: 0, refreshing: null }
 };
 
 let _sheets = null;
@@ -263,6 +271,22 @@ async function getStatus() {
 
 async function listRegistrations() { return readTab('Registrations'); }
 
+async function listPromoCodes() { return readTab('PromoCodes'); }
+
+async function findPromoByCode(code) {
+    // Always fetch fresh — admins change limits mid-event.
+    invalidate('PromoCodes');
+    const all = await listPromoCodes();
+    const upper = String(code).toUpperCase().trim();
+    return all.find(r => String(r.code).toUpperCase().trim() === upper) || null;
+}
+
+async function countPromoUsage(code) {
+    const all = await listRegistrations();
+    const upper = String(code).toUpperCase();
+    return all.filter(r => r.paymentStatus === 'paid' && String(r.promoCode).toUpperCase() === upper).length;
+}
+
 async function findRegistrationById(id) {
     const all = await listRegistrations();
     return all.find(r => r.id === id) || null;
@@ -310,6 +334,9 @@ module.exports = {
     ensureSchema,
     getStatus,
     listRegistrations,
+    listPromoCodes,
+    findPromoByCode,
+    countPromoUsage,
     findRegistrationById,
     createRegistration,
     updateRegistration,

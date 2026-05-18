@@ -4,12 +4,14 @@ const RegistrationRoutes = require('./RegistrationRoutes');
 const AdminRoutes = require('./AdminRoutes');
 const PaymentRoutes = require('./PaymentRoutes');
 const SettingsRoutes = require('./SettingsRoutes');
+const PromoRoutes = require('./PromoRoutes');
 
 const routes = [
     ...RegistrationRoutes,
     ...AdminRoutes,
     ...PaymentRoutes,
-    ...SettingsRoutes
+    ...SettingsRoutes,
+    ...PromoRoutes
 ];
 
 if (process.env.NODE_ENV === 'LOCAL') {

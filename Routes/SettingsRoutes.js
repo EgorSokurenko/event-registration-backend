@@ -15,7 +15,12 @@ const routes = [
         },
         handler: (_req, h) =>
             SheetsService.getSettings()
-                .then(res => UnFx.sendSuccess(res, h))
+                .then(settings => {
+                    // Strip promo internals — validated only via /api/promo/validate.
+                    const { promoCode, promoDiscount, ...publicSettings } = settings;
+                    // registrationLimit залишається у publicSettings — фронтенд може показати "місць залишилось".
+                    return UnFx.sendSuccess(publicSettings, h);
+                })
                 .catch(err => UnFx.sendError({}, h, err.message || 'Failed to load settings', 500))
     }
 ];

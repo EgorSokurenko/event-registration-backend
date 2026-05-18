@@ -22,7 +22,7 @@ function pickPublic(reg) {
 
 const RegistrationController = {
     create: async (req) => {
-        const { firstName, lastName, phone, email, age, city, church } = req.payload;
+        const { firstName, lastName, phone, email, age, city, church, promoCode } = req.payload;
 
         const reg = {
             id: randomUUID(),
@@ -39,12 +39,14 @@ const RegistrationController = {
             paidAt: '',
             arrived: 'FALSE',
             arrivedAt: '',
-            arrivedBy: ''
+            arrivedBy: '',
+            promoCode: ''
         };
 
         // Dev mode (no Mono token) — write the row, return without paymentUrl.
         if (!MonoService.isConfigured()) {
             console.warn('[registration] MONOBANK_TOKEN not set — skipping invoice creation');
+            if (promoCode) reg.promoCode = promoCode.trim().toUpperCase();
             await SheetsService.createRegistration(reg);
             return { id: reg.id, paymentUrl: null, devMode: true };
         }
@@ -52,8 +54,44 @@ const RegistrationController = {
         // Mono FIRST so we can write the row with monoInvoiceId already populated —
         // one sheet write instead of two. If Mono fails, no orphan row is left.
         const settings = await SheetsService.getSettings();
+
+        const limit = Number(settings.registrationLimit || 0);
+        if (limit > 0) {
+            const all = await SheetsService.listRegistrations();
+            const active = all.filter(r => r.paymentStatus === 'paid').length;
+            if (active >= limit) {
+                const err = new Error('Реєстрацію закрито — усі місця зайняті');
+                err.statusCode = 409;
+                throw err;
+            }
+        }
         const ticketPrice = Number(settings.ticketPrice || 400);
         const eventName = settings.eventName || 'Deep Calls to Deep';
+
+        // Validate promo code and compute final price.
+        let finalPrice = ticketPrice;
+        if (promoCode) {
+            const promo = await SheetsService.findPromoByCode(promoCode.trim());
+            const discount = Number(promo?.discount || 0);
+            if (promo && discount > 0) {
+                const limit = Number(promo.limit || 0);
+                const used = limit > 0 ? await SheetsService.countPromoUsage(promo.code) : 0;
+                if (limit === 0 || used < limit) {
+                    finalPrice = Math.max(0, ticketPrice - discount);
+                    reg.promoCode = String(promo.code).toUpperCase();
+                    console.log(`[promo] ${reg.promoCode} applied: ${ticketPrice} → ${finalPrice} (${used}/${limit || '∞'})`);
+                }
+            }
+        }
+
+        // Free ticket (promo covers full price) — skip Mono, mark paid immediately.
+        if (finalPrice === 0) {
+            reg.paymentStatus = 'paid';
+            reg.paidAt = localTimestamp();
+            await SheetsService.createRegistration(reg);
+            await PaymentController._sendTicketFor(reg);
+            return { id: reg.id, paymentUrl: null };
+        }
 
         const backendUrl = process.env.BACKEND_URL || 'http://localhost:9090';
         const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
@@ -61,7 +99,7 @@ const RegistrationController = {
         let invoice;
         try {
             invoice = await MonoService.createInvoice({
-                amount: ticketPrice,
+                amount: finalPrice,
                 reference: reg.id,
                 destination: `Реєстрація: ${eventName}`,
                 redirectUrl: `${frontendUrl}/ticket/${reg.id}`,
